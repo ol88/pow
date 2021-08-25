@@ -103,8 +103,13 @@ defmodule Pow.Store.Backend.MnesiaCache do
   def start_link(config) do
     # TODO: Remove by 1.1.0
     case Config.get(config, :nodes) do
-      nil    -> :ok
-      _nodes -> IO.warn("use of `:nodes` config value for #{inspect unquote(__MODULE__)} is no longer used")
+      nil ->
+        :ok
+
+      _nodes ->
+        IO.warn(
+          "use of `:nodes` config value for #{inspect(unquote(__MODULE__))} is no longer used"
+        )
     end
 
     GenServer.start_link(__MODULE__, config, name: __MODULE__)
@@ -147,7 +152,8 @@ defmodule Pow.Store.Backend.MnesiaCache do
   end
 
   @impl GenServer
-  @spec handle_cast({:cache, Base.config(), Base.record() | [Base.record()], integer()}, map()) :: {:noreply, map()}
+  @spec handle_cast({:cache, Base.config(), Base.record() | [Base.record()], integer()}, map()) ::
+          {:noreply, map()}
   def handle_cast({:cache, config, record_or_records, ttl}, %{invalidators: invalidators} = state) do
     invalidators =
       record_or_records
@@ -161,7 +167,8 @@ defmodule Pow.Store.Backend.MnesiaCache do
     {:noreply, %{state | invalidators: invalidators}}
   end
 
-  @spec handle_cast({:delete, Base.config(), Base.key() | [Base.key()]}, map()) :: {:noreply, map()}
+  @spec handle_cast({:delete, Base.config(), Base.key() | [Base.key()]}, map()) ::
+          {:noreply, map()}
   def handle_cast({:delete, config, key}, %{invalidators: invalidators} = state) do
     invalidators =
       key
@@ -206,7 +213,7 @@ defmodule Pow.Store.Backend.MnesiaCache do
 
   defp append_invalidator(key, invalidators, ttl, config) do
     invalidators = clear_invalidator(key, invalidators)
-    invalidator  = trigger_ttl(key, ttl, config)
+    invalidator = trigger_ttl(key, ttl, config)
 
     Map.put(invalidators, key, invalidator)
   end
@@ -218,13 +225,13 @@ defmodule Pow.Store.Backend.MnesiaCache do
   defp refresh_invalidators_in_cluster(config) do
     :running_db_nodes
     |> :mnesia.system_info()
-    |> Enum.reject(& &1 == node())
+    |> Enum.reject(&(&1 == node()))
     |> Enum.each(&:rpc.call(&1, GenServer, :cast, [__MODULE__, {:refresh_invalidators, config}]))
   end
 
   defp clear_invalidator(key, invalidators) do
     case Map.get(invalidators, key) do
-      nil         -> nil
+      nil -> nil
       invalidator -> Process.cancel_timer(invalidator)
     end
 
@@ -234,15 +241,16 @@ defmodule Pow.Store.Backend.MnesiaCache do
   defp table_get(key, config) do
     case fetch(config, key) do
       {value, _expire} -> value
-      nil              -> :not_found
+      nil -> :not_found
     end
   end
 
   defp fetch(config, key) do
     mnesia_key = mnesia_key(config, key)
+
     case :mnesia.dirty_read({@mnesia_cache_tab, mnesia_key}) do
       [{@mnesia_cache_tab, ^mnesia_key, value}] -> value
-      []                                        -> nil
+      [] -> nil
     end
   end
 
@@ -258,14 +266,14 @@ defmodule Pow.Store.Backend.MnesiaCache do
   defp unwrap([_namespace | key]), do: key
 
   defp table_insert(record_or_records, ttl, config) do
-    expire  = timestamp() + ttl
+    expire = timestamp() + ttl
     records = List.wrap(record_or_records)
 
     {:atomic, _result} =
       :mnesia.sync_transaction(fn ->
         Enum.map(records, fn {key, value} ->
           mnesia_key = mnesia_key(config, key)
-          value      = {value, expire}
+          value = {value, expire}
 
           :mnesia.write({@mnesia_cache_tab, mnesia_key, value})
         end)
@@ -289,14 +297,14 @@ defmodule Pow.Store.Backend.MnesiaCache do
 
   defp init_mnesia(config) do
     case find_active_cluster_nodes(config) do
-      []    -> init_cluster(config)
+      [] -> init_cluster(config)
       nodes -> join_cluster(config, nodes)
     end
   end
 
   defp find_active_cluster_nodes(config) do
     visible_nodes = Node.list()
-    db_nodes      = Config.get(config, :extra_db_nodes, [])
+    db_nodes = Config.get(config, :extra_db_nodes, [])
 
     db_nodes =
       case db_nodes do
@@ -305,8 +313,8 @@ defmodule Pow.Store.Backend.MnesiaCache do
       end
 
     db_nodes
-    |> Enum.filter(& &1 in visible_nodes)
-    |> Enum.filter(&:rpc.block_call(&1, :mnesia, :system_info, [:is_running]) == :yes)
+    |> Enum.filter(&(&1 in visible_nodes))
+    |> Enum.filter(&(:rpc.block_call(&1, :mnesia, :system_info, [:is_running]) == :yes))
   end
 
   defp init_cluster(config) do
@@ -314,13 +322,12 @@ defmodule Pow.Store.Backend.MnesiaCache do
          :ok <- change_table_copy_type(config),
          :ok <- create_table(config),
          :ok <- wait_for_table(config) do
-
-      Logger.info("Mnesia cluster initiated on #{inspect node()}")
+      Logger.info("Mnesia cluster initiated on #{inspect(node())}")
 
       :ok
     else
       {:error, reason} ->
-        Logger.error("Couldn't initialize mnesia cluster because: #{inspect reason}")
+        Logger.error("Couldn't initialize mnesia cluster because: #{inspect(reason)}")
         {:error, reason}
     end
   end
@@ -332,13 +339,12 @@ defmodule Pow.Store.Backend.MnesiaCache do
          :ok <- change_table_copy_type(config),
          :ok <- sync_table(config, cluster_nodes),
          :ok <- wait_for_table(config) do
-
-      Logger.info("Joined mnesia cluster nodes #{inspect cluster_nodes} for #{inspect node()}")
+      Logger.info("Joined mnesia cluster nodes #{inspect(cluster_nodes)} for #{inspect(node())}")
 
       :ok
     else
       {:error, reason} ->
-        Logger.error("Couldn't join mnesia cluster because: #{inspect reason}")
+        Logger.error("Couldn't join mnesia cluster because: #{inspect(reason)}")
         {:error, reason}
     end
   end
@@ -346,7 +352,7 @@ defmodule Pow.Store.Backend.MnesiaCache do
   defp start_mnesia do
     case Application.start(:mnesia) do
       {:error, {:already_started, :mnesia}} -> :ok
-      :ok                                   -> :ok
+      :ok -> :ok
     end
   end
 
@@ -363,17 +369,27 @@ defmodule Pow.Store.Backend.MnesiaCache do
   end
 
   defp change_table_copy_type(config) do
+    IO.puts("Pow change_table_copy_type")
+    IO.inspect(config, label: "config: ")
+
+    IO.inspect(node(), label: "node() function result: ")
+
     copy_type = get_copy_type(config, node())
 
-    case :mnesia.change_table_copy_type(:schema, node(), copy_type) do
-      {:atomic, :ok}                               -> :ok
+    IO.inspect(copy_type, label: "copy_type: ")
+
+    case :mnesia.change_table_copy_type(:schema, node(), copy_type)
+         |> IO.inspect(
+           label: ":mnesia.change_table_copy_type(:schema, node(), copy_type) result: "
+         ) do
+      {:atomic, :ok} -> :ok
       {:aborted, {:already_exists, :schema, _, _}} -> :ok
-      any                                          -> {:error, {:change_table_copy_type, any}}
+      any -> {:error, {:change_table_copy_type, any}}
     end
   end
 
   defp get_copy_type(config, node) do
-    types      = [:ram_copies, :disc_copies, :disc_only_copies]
+    types = [:ram_copies, :disc_copies, :disc_only_copies]
     table_opts = Config.get(config, :table_opts, [])
 
     Enum.find(types, :disc_copies, fn type ->
@@ -384,23 +400,24 @@ defmodule Pow.Store.Backend.MnesiaCache do
   end
 
   defp create_table(config) do
-    table_opts = Config.get(config, :table_opts, [disc_copies: [node()]])
-    table_def  = Keyword.merge(table_opts, [type: :ordered_set])
+    table_opts = Config.get(config, :table_opts, disc_copies: [node()])
+    table_def = Keyword.merge(table_opts, type: :ordered_set)
 
     case :mnesia.create_table(@mnesia_cache_tab, table_def) do
-      {:atomic, :ok}                                   -> :ok
+      {:atomic, :ok} -> :ok
       {:aborted, {:already_exists, @mnesia_cache_tab}} -> :ok
-      any                                              -> {:error, {:create_table, any}}
+      any -> {:error, {:create_table, any}}
     end
   end
 
   defp sync_table(_config, [cluster_node | _rest]) do
-    copy_type = :rpc.block_call(cluster_node, :mnesia, :table_info, [@mnesia_cache_tab, :storage_type])
+    copy_type =
+      :rpc.block_call(cluster_node, :mnesia, :table_info, [@mnesia_cache_tab, :storage_type])
 
     case :mnesia.add_table_copy(@mnesia_cache_tab, node(), copy_type) do
-      {:atomic, :ok}                      -> :ok
+      {:atomic, :ok} -> :ok
       {:aborted, {:already_exists, _, _}} -> :ok
-      any                                 -> {:error, {:add_table_copy, any}}
+      any -> {:error, {:add_table_copy, any}}
     end
   end
 
@@ -412,7 +429,7 @@ defmodule Pow.Store.Backend.MnesiaCache do
 
   defp connect_to_cluster([cluster_node | _cluster_nodes]) do
     case :mnesia.change_config(:extra_db_nodes, [cluster_node]) do
-      {:ok, _}         -> :ok
+      {:ok, _} -> :ok
       {:error, reason} -> {:error, reason}
     end
   end
@@ -428,29 +445,34 @@ defmodule Pow.Store.Backend.MnesiaCache do
 
     {:atomic, invalidators} =
       :mnesia.sync_transaction(fn ->
-        :mnesia.foldl(fn
-          {@mnesia_cache_tab, key, {_value, expire}}, invalidators when is_list(key) ->
-            ttl = Enum.max([expire - timestamp(), 0])
+        :mnesia.foldl(
+          fn
+            {@mnesia_cache_tab, key, {_value, expire}}, invalidators when is_list(key) ->
+              ttl = Enum.max([expire - timestamp(), 0])
 
-            key
-            |> unwrap()
-            |> append_invalidator(invalidators, ttl, config)
+              key
+              |> unwrap()
+              |> append_invalidator(invalidators, ttl, config)
 
-          # TODO: Remove by 1.1.0
-          {@mnesia_cache_tab, key, {_key, _value, _config, expire}}, invalidators when is_binary(key) and is_number(expire) ->
-            Logger.warn("Deleting old record in the mnesia cache: #{inspect key}")
+            # TODO: Remove by 1.1.0
+            {@mnesia_cache_tab, key, {_key, _value, _config, expire}}, invalidators
+            when is_binary(key) and is_number(expire) ->
+              Logger.warn("Deleting old record in the mnesia cache: #{inspect(key)}")
 
-            :mnesia.delete({@mnesia_cache_tab, key})
+              :mnesia.delete({@mnesia_cache_tab, key})
 
-            invalidators
+              invalidators
 
-          {@mnesia_cache_tab, key, _value}, invalidators ->
-            Logger.warn("Found an unexpected record in the mnesia cache, please delete it: #{inspect key}")
+            {@mnesia_cache_tab, key, _value}, invalidators ->
+              Logger.warn(
+                "Found an unexpected record in the mnesia cache, please delete it: #{inspect(key)}"
+              )
 
-            invalidators
-        end,
-        %{},
-        @mnesia_cache_tab)
+              invalidators
+          end,
+          %{},
+          @mnesia_cache_tab
+        )
       end)
 
     invalidators
